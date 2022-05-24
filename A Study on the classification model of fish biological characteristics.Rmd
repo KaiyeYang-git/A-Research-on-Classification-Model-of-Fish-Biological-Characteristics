@@ -1,0 +1,232 @@
+```{r}
+# Get the Data
+
+# Read in with tidytuesdayR package 
+# Install from CRAN via: install.packages("tidytuesdayR")
+# This loads the readme and all the data sets for the week of interest
+stocked <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-06-08/stocked.csv')
+
+# install the required packages
+library(caTools)
+library(car)
+library(MASS)
+library(MVN)
+```
+
+```{r}
+# A filter function about the important information of stocked fish in Great Lakes Areas
+stock<-data.frame(stocked['SPECIES'],stocked['WEIGHT'],stocked['LENGTH'],stocked['AGEMONTH'])
+# According to the literature support, this research only concentrated on trouts and Chinook Salmon
+stock<-subset(stock,SPECIES=='BNT'| SPECIES=='LAT'| SPECIES=='BKT'|SPECIES=='CHS')
+# Calculate the number of Not a Number in the stock data frame
+proportion_of_nan_in_stock_dataframe<-sum(is.na(stock))/(dim(stock)[1]*(dim(stock)[2]))
+print(paste('The proportion of nan in stock dataframe: ',proportion_of_nan_in_stock_dataframe))
+# Because the percentage of NaNs exceeds the recommended threshold for accepting missing data (10%), it is recommended that some data techniques be used to fix missing information in the data
+# The first option is to delete the whole case (Listwise method) to make sure the rest data is all valid.
+# Therefore, it is necessary to validate the assumption of missing data not at random, which is the probability that the data are missing is not related to either the specific value which is supposed to be obtained or the set of observed responses.
+# Thus, it is important to compare the missing data proportion in each measuring dimensions of 
+proportion_of_nan_in_weight<-sum(is.na(stock['WEIGHT']))/(dim(stock['WEIGHT'])[1]*(dim(stock['WEIGHT'])[2]))
+proportion_of_nan_in_age<-sum(is.na(stock['AGEMONTH']))/(dim(stock['AGEMONTH'])[1]*(dim(stock['AGEMONTH'])[2]))
+proportion_of_nan_in_length<-sum(is.na(stock['LENGTH']))/(dim(stock['LENGTH'])[1]*(dim(stock['LENGTH'])[2]))
+print(paste('The proportion of nan in weight: ',proportion_of_nan_in_weight))
+print(paste('The proportion of nan in age: ',proportion_of_nan_in_age))
+print(paste('The proportion of nan in length: ',proportion_of_nan_in_length))
+# It is obvious that the missing data proportion in each dimensions is not the same, which might strongly refuse the assumption of MCAR.
+
+# Another technique is Regression imputation, but it is based on the data that follows on a certain type of time-series pattern or seasonality. However, a fish's biological characteristics are independent of other fish in terms of time or season, and are related to the genetic information carried by its genes. But the genetic information was not in the range of measurements, so this method was also rejected.
+
+# The last method is fill the data by itself through using median, mean and mode. Its advantage is that it does not require any assumptions about sampling method or correlation among variables (but it will reduces the variance in the data set)
+stock['WEIGHT']<-stock['WEIGHT']/100
+stock['LENGTH']<-stock['LENGTH']/10
+options(scipen = 100)
+
+# Observation is required to decide which imputation value SSshould be fit in.
+Trout<-subset(stock,SPECIES=='BNT'| SPECIES=='LAT'| SPECIES=='BKT')
+Salmon<-subset(stock,SPECIES=='CHS')
+
+summary(Trout)
+summary(Salmon)
+# Trout Data
+Trout['SPECIES']<-'TRT'
+par(mfrow=c(1,3))
+boxplot(Trout$WEIGHT,xlab='Weight difference of Trout',ylab='Measure in Kilograms',width=100)
+boxplot(Trout$LENGTH,xlab='Length difference of Trout',ylab='Measure in Millimeter',width=100)
+boxplot(Trout$AGEMONTH,xlab='Age difference of Trout',ylab='Measure in Month',width=100)
+
+# Salmon Data
+par(mfrow=c(1,3))
+boxplot(Salmon$WEIGHT,xlab='Weight difference of Salmon',ylab='Measure in Kilograms',width=100)
+boxplot(Salmon$LENGTH,xlab='Length difference of Salmon',ylab='Measure in Millimeter',width=100)
+boxplot(Salmon$AGEMONTH,xlab='Age difference of Salmon',ylab='Measure in Month',width=100)
+
+#It is obvious that all the data is influenced by the long tail which is impossible in the real life(probable importing mistakes). While using the average value is highly influenced by the outliers.
+hist(Trout$WEIGHT, main='Histograms of Data Strucuture',xlab='Weight Count of Trout',ylab='Measure in Kilograms',width=100)
+hist(Trout$LENGTH, main='Histograms of Data Strucuture',xlab='Length Count of Trout',ylab='Measure in Millimeter',width=100)
+hist(Trout$AGEMONTH,main='Histograms of Data Strucuture',xlab='Age Count of Trout',ylab='Measure in Month',width=100)
+
+
+hist(Salmon$WEIGHT, main='Histograms of Data Strucuture',xlab='Weight Count of Salmon',ylab='Measure in Kilograms',width=100)
+hist(Salmon$LENGTH, main='Histograms of Data Strucuture',xlab='Length Count of Salmon',ylab='Measure in Millimeter',width=100)
+hist(Salmon$AGEMONTH,main='Histograms of Data Strucuture',xlab='Age Count of Salmon',ylab='Measure in Month',width=100)
+```
+
+
+```{r}
+Trout<-na.omit(Trout)
+Salmon<-na.omit(Salmon)
+summary(Trout)
+summary(Salmon)
+mvn(Trout[,2:4], mvnTest = c("mardia"), multivariatePlot = c("qq"),alpha=0.001)
+mvn(Salmon[,2:4], mvnTest = c("mardia"), multivariatePlot = c("qq"),alpha=0.001)
+# Unite the trout species and unite the two data frames
+New_stock<-merge(Trout,Salmon, all=T)
+New_stock$SPECIES<-as.factor(New_stock$SPECIES)
+# Validation procedures
+# Three classification models are selected, logistic regression, LDA analysis, and QDA analysis
+```
+
+```{r}
+# Build the train and test data sets
+sample<- sample.split(New_stock, SplitRatio = 0.75)
+train<-subset(New_stock, sample == 'TRUE')
+test<- subset(New_stock, sample == 'FALSE')
+
+#Build the logistic model
+# Since it is abstract about the formula construction on mentioning the relationships about fish type and fish bio metric characteristics, thus both addition and multiplication would be applied to build connection with the fish identification since both functions could  express the meaning of each independent variable and the relationship between variables when they are scaled through the identical procedures.
+
+# addition
+logistic_fit_add = glm(as.numeric(New_stock$SPECIES=="CHS") ~ New_stock$WEIGHT+New_stock$LENGTH+New_stock$AGEMONTH, data = train, family = "binomial")
+summary(logistic_fit_add)
+
+# Multiplication
+logistic_fit_mul = glm(as.numeric(New_stock$SPECIES=="CHS") ~ New_stock$WEIGHT*New_stock$LENGTH*New_stock$AGEMONTH, data = train, family = "binomial",maxit = 100)
+summary(logistic_fit_mul)
+```
+
+
+```{r}
+#Validation parts
+# Logistic regression assumptions
+# The outcome variables should be binary
+table(train$SPECIES)
+# Select only numeric predictors
+print(paste('Number of non-numeric data in Trout weight: ', sum(!is.numeric(Trout$WEIGHT))))
+print(paste('Number of non-numeric data in Trout length: ', sum(!is.numeric(Trout$LENGTH))))
+print(paste('Number of non-numeric data in Trout age: ', sum(!is.numeric(Trout$AGEMONTH))))
+print(paste('Number of non-numeric data in salmon weight: ', sum(!is.numeric(Salmon$WEIGHT))))
+print(paste('Number of non-numeric data in salmon length: ', sum(!is.numeric(Salmon$LENGTH))))
+print(paste('Number of non-numeric data in salmon age: ', sum(!is.numeric(Salmon$AGEMONTH))))
+
+# Linearity of independent variables and log-odds 
+#Variance inflation factor measures how much the behavior (variance) of an independent variable is influenced, or inflated, by its interaction/correlation with the other independent variables.
+vif(logistic_fit_add)
+vif(logistic_fit_mul)
+# A visualization about the relationships between data
+pairs(train,pch=7,col=c('black','red')[train$SPECIES])
+
+prob<-predict(logistic_fit_add,type = 'response')
+logitP<-log(prob/(1-prob))
+boxTidwell(logitP ~ New_stock$WEIGHT+New_stock$LENGTH+New_stock$AGEMONTH, data=train)
+```
+```{r}
+#LDA Analysis
+# Validation the assumptions of LDA method
+variance_weight<-var(New_stock$WEIGHT)
+variance_length<-var(New_stock$LENGTH)
+variance_age<-var(New_stock$AGEMONTH)
+barplot(c(variance_weight,variance_length,variance_age),main='Variance Difference among the weight, length, and age variables', xlab='Degree of variables', ylab='Varaince of variables',names.arg = c("Weight", "Length", "Age month"))
+LDA_fit_add<-lda(train$SPECIES ~ train$WEIGHT+train$LENGTH+train$AGEMONTH, data=train)
+LDA_fit_add
+LDA_fit_add_class_pred <- predict(LDA_fit_add, train)$class
+table(Prediction=LDA_fit_add_class_pred,Actual_Value=train[,1])
+
+LDA_fit_mul<-lda(train$SPECIES ~ train$WEIGHT*train$LENGTH*train$AGEMONTH, data=train)
+LDA_fit_mul
+LDA_fit_mul_class_pred <- predict(LDA_fit_mul, train)$class
+table(Prediction=LDA_fit_mul_class_pred,Actual_Value=train[,1])
+```
+
+
+```{r}
+QDA_fit_add<-qda(train$SPECIES ~ train$WEIGHT+train$LENGTH+train$AGEMONTH, data=train)
+QDA_fit_add
+QDA_fit_add_class_pred <- predict(QDA_fit_add, train)$class
+table(Prediction=QDA_fit_add_class_pred,Actual_Value=train[,1])
+
+QDA_fit_mul<-qda(train$SPECIES ~ train$WEIGHT*train$LENGTH*train$AGEMONTH, data=train)
+QDA_fit_mul
+QDA_fit_mul_class_pred <- predict(QDA_fit_mul, train)$class
+table(Prediction=QDA_fit_mul_class_pred,Actual_Value=train[,1])
+
+add_f1<-(2*(311/(311+3055))*(311/(311+28))/((311/(311+3055))+(311/(311+28))))
+mul_f1<-(2*(335/(335+3035))*(335/(335+4))/((335/(335+3035))+(335/(335+4))))
+add_f1
+mul_f1
+```
+
+```{r}
+QDA_fit_add_test<-qda(test$SPECIES ~ test$WEIGHT+test$LENGTH+test$AGEMONTH, data=test)
+QDA_fit_add_test
+QDA_fit_add_class_pred_test <- predict(QDA_fit_add_test, test)$class
+table(Prediction=QDA_fit_add_class_pred_test,Actual_Value=test[,1])
+QDA_fit_mul_test<-qda(test$SPECIES ~ test$WEIGHT*test$LENGTH*test$AGEMONTH, data=test)
+QDA_fit_mul_test
+QDA_fit_mul_class_pred_test <- predict(QDA_fit_mul_test, test)$class
+table(Prediction=QDA_fit_mul_class_pred_test,Actual_Value=test[,1])
+mul_test_f1<-(2*(113/(113+1014))*(113/(113+0))/((113/(113+1014))+(113/(113+0))))
+mul_test_f1
+```
+
+```{r}
+QDA_add<-qda(New_stock$SPECIES ~ New_stock$WEIGHT+New_stock$LENGTH+New_stock$AGEMONTH, data=New_stock)
+QDA_mul<-qda(New_stock$SPECIES ~ New_stock$WEIGHT*New_stock$LENGTH*New_stock$AGEMONTH, data=New_stock)
+```
+
+```{r}
+#build a k-fold function to resample the original dataset
+cv.qda <-
+  function (data, model, yname, K, seed) {
+    n <- nrow(data)
+    set.seed(seed)
+    # datay=data$SPECIES #response variable
+
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    #generate indices 1:10 and sample n of them  
+    # K fold cross-validated error
+    
+    CV=NULL
+    
+    for (i in 1:K) { #i=1
+      test.index <- seq_len(n)[(s == i)] #test data
+      train.index <- seq_len(n)[(s!= i)] #training data
+      #model with training data
+      qda.fit=qda(model, data=data[train.index,])
+      #observed test set y
+      qda.y <- data[test.index, yname]
+      #predicted test set y
+      qda.predy=predict(qda.fit, data[train.index,])$class
+      train_cv<-data[train.index,]
+      #observed - predicted on test data
+      error= mean(qda.y!=qda.predy)
+      #error rates 
+      CV=c(CV,error)
+      
+    }
+    #Output
+    list(call = model, K = K, 
+         qda_error_rate = mean(CV), seed = seed, prediction=qda.predy, train=train_cv)  
+  }
+qda_k_fold<-cv.qda(data=train,model=SPECIES~WEIGHT*LENGTH*AGEMONTH, yname="Species", K=5, seed=1)
+qda_k_fold
+table(Prediction=qda_k_fold$prediction,Acutal_Value=qda_k_fold$train[,1])
+qda_k_tfold<-cv.qda(data=test,model=SPECIES~WEIGHT*LENGTH*AGEMONTH, yname="Species", K=5, seed=1)
+qda_k_tfold
+table(Prediction=qda_k_tfold$prediction,Acutal_Value=qda_k_tfold$train[,1])
+```
+
+
+
+
+
